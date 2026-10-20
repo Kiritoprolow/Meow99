@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+.local_store/
+*.mp4
+.pytest_cache/

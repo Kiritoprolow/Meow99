@@ -1,0 +1,5 @@
+# Worker (GitHub Actions). Không cần mcp/uvicorn.
+pillow>=10.0
+pydantic>=2.9
+requests>=2.31
+huggingface_hub>=0.30

@@ -1,0 +1,6 @@
+# Gateway (Hugging Face Space). mcp 2.x: lớp MCPServer + Streamable HTTP (đã kiểm thử với 2.3.0).
+mcp>=2.3,<3
+pydantic>=2.9
+requests>=2.31
+uvicorn>=0.30
+huggingface_hub>=0.30

@@ -1,0 +1,69 @@
+name: render-video
+
+# Tên run chứa job_id: gateway dùng nó để ánh xạ job_id -> workflow run.
+run-name: video-job ${{ inputs.job_id }} #${{ inputs.attempt }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "ID job (job_YYYYMMDD_HHMMSS_xxxxxx)"
+        required: true
+        type: string
+      attempt:
+        description: "Lần chạy (1 = lần đầu, 2+ = retry)"
+        required: false
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-worker.txt
+
+      - name: Kiểm tra đầu vào
+        shell: bash
+        env:
+          JOB_ID: ${{ inputs.job_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: |
+          [[ "$JOB_ID" =~ ^job_[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$ ]] || { echo "job_id không hợp lệ"; exit 1; }
+          [[ "$ATTEMPT" =~ ^[1-5]$ ]] || { echo "attempt không hợp lệ"; exit 1; }
+
+      - name: Cài FFmpeg và font Unicode
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+
+      - name: Cài thư viện Python
+        run: pip install -r requirements-worker.txt
+
+      - name: Render và upload
+        env:
+          # Giá trị đi qua biến môi trường (không nội suy trực tiếp vào lệnh shell) để tránh script injection.
+          JOB_ID: ${{ inputs.job_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+          STORE_BACKEND: hub
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_STATE_REPO: ${{ vars.HF_STATE_REPO }}
+          HF_OUTPUT_REPO: ${{ vars.HF_OUTPUT_REPO }}
+          # YouTube (tùy chọn, Giai đoạn 5): thiếu thì job vẫn hoàn tất, YouTube báo pending_configuration.
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python -m video_engine.run --job-id "$JOB_ID" --attempt "$ATTEMPT"

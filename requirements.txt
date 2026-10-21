@@ -1,5 +1,7 @@
-# Gateway (Hugging Face Space). mcp 2.x: lớp MCPServer + Streamable HTTP (đã kiểm thử với 2.3.0).
-mcp>=2.3,<3
+# Gateway (Hugging Face Space, SDK gradio). HF luôn cài gradio[oauth,mcp] (yêu cầu mcp<2) nên Space dùng mcp 1.x.
+# Code tự nhận diện mcp 1.x (FastMCP) hoặc 2.x (MCPServer).
+# Khi lên Space: đổi tên file này thành requirements.txt ở thư mục gốc Space.
+mcp>=1.30,<2
 pydantic>=2.9
 requests>=2.31
 uvicorn>=0.30

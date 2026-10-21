@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.mcpserver import MCPServer
+try:  # mcp 2.x
+    from mcp.server.mcpserver import MCPServer
+    MCP_V2 = True
+except ImportError:  # mcp 1.x: Space Gradio luôn cài gradio[mcp] (yêu cầu mcp<2)
+    from mcp.server.fastmcp import FastMCP as MCPServer
+    MCP_V2 = False
 
 from app.service import JobService, ServiceError
 
@@ -19,8 +24,9 @@ INSTRUCTIONS = (
 )
 
 
-def build_mcp(service: JobService, owner: str = "default") -> MCPServer:
-    mcp = MCPServer(name="ai-video-studio", instructions=INSTRUCTIONS)
+def build_mcp(service: JobService, owner: str = "default", **server_kwargs: Any) -> Any:
+    """server_kwargs (cấu hình HTTP) chỉ dùng với mcp 1.x; mcp 2.x nhận chúng ở streamable_http_app()."""
+    mcp = MCPServer(name="ai-video-studio", instructions=INSTRUCTIONS, **({} if MCP_V2 else server_kwargs))
 
     def guard(fn):  # chuyển ServiceError thành kết quả có cấu trúc
         def run(*a: Any, **kw: Any) -> dict[str, Any]:

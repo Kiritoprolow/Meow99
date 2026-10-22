@@ -21,13 +21,15 @@ from typing import Any, Mapping
 
 from PIL import Image
 
-from app.schemas import MAX_3D_FRAMES, MAX_3D_FRAMES_1080P, Scene3DOptions
+from app.schemas import (MAX_3D_FRAMES, MAX_3D_FRAMES_1080P, RENDER_BUDGET_SECONDS, Scene3DOptions,
+                         estimate_render_seconds)
 from video_engine.engines.base import EngineOutput, RenderContext, StageError
 from video_engine.renderer.ffmpeg_renderer import run as run_cmd
 
 SCENE_SCRIPT = Path(__file__).resolve().parent / "blender_scripts" / "scene_basic.py"
 MIN_BLENDER = (4, 2)                    # EEVEE Next ổn định từ 4.2; script đã thử trên 5.2 LTS
-SAMPLES = {"preview": 16, "standard": 64}
+SAMPLES = {("cycles", "preview"): 12, ("cycles", "standard"): 32,   # cycles: denoise tự bật từ 32 mẫu
+           ("eevee", "preview"): 4, ("eevee", "standard"): 16}
 DEFAULT_RENDER_TIMEOUT = 1200           # giây; thấp hơn timeout-minutes=30 của workflow để còn thời gian encode/upload
 MAX_FRAMES_ZIP_BYTES = 150 * 1024 * 1024
 _SECRET_HINTS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
@@ -121,6 +123,9 @@ class Blender3DEngine:
             cap = min(cap, MAX_3D_FRAMES_1080P)
         if frames > cap:  # kiểm tra lại ở worker (phòng request tạo tay, bỏ qua gateway)
             raise StageError("render_3d", f"{frames} frame vượt giới hạn {cap} của profile {profile}")
+        est = estimate_render_seconds(opts.engine, profile, r["aspect_ratio"], r["resolution"], frames)
+        if est > RENDER_BUDGET_SECONDS:
+            raise StageError("render_3d", f"Ước lượng render ~{est:.0f}s vượt ngân sách {RENDER_BUDGET_SECONDS:.0f}s (fail-fast)")
 
         ctx.progress("blender_check")
         binary = find_blender(ctx.env)
@@ -138,7 +143,7 @@ class Blender3DEngine:
             cfg = {"frames_dir": str(frames_dir), "blend_path": str(blend_path), "width": w, "height": h, "fps": fps,
                    "frames": frames, "shape": opts.shape, "object_color": opts.object_color,
                    "background_color": opts.background_color, "camera_move": opts.camera_move, "engine": engine,
-                   "samples": SAMPLES[profile]}
+                   "samples": SAMPLES[(engine, profile)]}
             cfg_path = wd / f"scene_config_{engine}.json"
             cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             log_path = wd / f"blender_{engine}.log"
@@ -197,8 +202,9 @@ class Blender3DEngine:
 
         report: dict[str, Any] = {
             "blender": {"version": ".".join(map(str, ver)), "version_text": ver_text, "engine": used,
-                        "samples": SAMPLES[profile], "render_profile": profile, "frames": frames, "fps": fps,
-                        "render_seconds": render_seconds, "fallback": fallback},
+                        "samples": SAMPLES[(used, profile)], "render_profile": profile, "frames": frames, "fps": fps,
+                        "render_seconds": render_seconds, "estimated_seconds": round(est, 1),
+                        "seconds_per_frame": round(render_seconds / frames, 2), "fallback": fallback},
             "scene": opts.model_dump(),
             "artifacts": {"png_sequence": "frames.zip" if "frames.zip" in files else None, "blend": "scene.blend"},
         }

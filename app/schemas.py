@@ -34,6 +34,22 @@ RENDER_PROFILES = ("preview", "standard")
 MAX_3D_FRAMES = {"preview": 240, "standard": 480}
 MAX_3D_FRAMES_1080P = 240
 
+# Ước lượng thời gian render để fail-fast TRƯỚC khi tốn một lượt GitHub Actions (runner miễn phí: 4 vCPU, không GPU).
+# Số đo thật (giây/frame ở 854x480, 4 core): cycles 12spp ~1.5 | cycles 32spp+denoise ~5.7 | eevee 4spp ~2.6 | eevee 16spp ~8-10.
+# Bảng dưới đã nhân hệ số an toàn ~2 vì runner Azure đo chậm hơn máy thử khoảng 2 lần; hiệu chỉnh lại khi có thêm số đo.
+SECONDS_PER_FRAME_480P = {("cycles", "preview"): 3.0, ("cycles", "standard"): 11.0,
+                          ("eevee", "preview"): 4.0, ("eevee", "standard"): 12.5}
+RENDER_FIXED_OVERHEAD_SECONDS = 40.0   # khởi động Blender + frame đầu (biên dịch shader)
+RENDER_BUDGET_SECONDS = 1000.0         # < BLENDER_RENDER_TIMEOUT mặc định (1200s) để còn dư địa
+_PIXELS = {("16:9", "480p"): 854 * 480, ("16:9", "720p"): 1280 * 720, ("16:9", "1080p"): 1920 * 1080,
+           ("9:16", "480p"): 480 * 854, ("9:16", "720p"): 720 * 1280, ("9:16", "1080p"): 1080 * 1920,
+           ("1:1", "480p"): 480 * 480, ("1:1", "720p"): 720 * 720, ("1:1", "1080p"): 1080 * 1080}
+
+
+def estimate_render_seconds(engine: str, profile: str, aspect_ratio: str, resolution: str, frames: int) -> float:
+    per_frame = SECONDS_PER_FRAME_480P[(engine, profile)] * _PIXELS[(aspect_ratio, resolution)] / _PIXELS[("16:9", "480p")]
+    return RENDER_FIXED_OVERHEAD_SECONDS + per_frame * frames
+
 
 class Scene3DOptions(BaseModel):
     """Tham số cảnh cho project_type=animation_3d, nằm trong `options`. extra=forbid để lỗi chính tả bị báo ngay."""
@@ -45,7 +61,7 @@ class Scene3DOptions(BaseModel):
     background_color: str = Field(default="#1b2a41", pattern=r"^#[0-9a-fA-F]{6}$")
     camera_move: Literal["orbit", "dolly"] = "orbit"
     fps: int = Field(default=24, ge=12, le=30)
-    engine: Literal["eevee", "cycles"] = "eevee"
+    engine: Literal["eevee", "cycles"] = "cycles"  # trên runner không GPU, Cycles CPU nhanh hơn EEVEE (OpenGL phần mềm)
 
 
 class VideoJobRequest(BaseModel):
@@ -115,6 +131,12 @@ class VideoJobRequest(BaseModel):
             raise ValueError(
                 f"animation_3d/{self.render_profile}{'/1080p' if self.resolution == '1080p' else ''}: tối đa {cap} frame "
                 f"(duration_seconds x fps = {frames}); giảm duration_seconds hoặc fps")
+        est = estimate_render_seconds(opts.engine, self.render_profile, self.aspect_ratio, self.resolution, frames)
+        if est > RENDER_BUDGET_SECONDS:
+            raise ValueError(
+                f"Ước lượng render ~{est:.0f}s vượt ngân sách {RENDER_BUDGET_SECONDS:.0f}s của runner miễn phí "
+                f"({opts.engine}/{self.render_profile}/{self.resolution}, {frames} frame); giảm resolution, fps, duration_seconds "
+                f"hoặc dùng render_profile=preview")
         return self
 
 

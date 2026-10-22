@@ -40,7 +40,7 @@ class SchemaBackwardCompat(unittest.TestCase):
 
     def test_3d_defaults_and_options(self):
         r = VideoJobRequest.model_validate(make3d())
-        self.assertEqual(Scene3DOptions.model_validate(r.options).fps, 24)
+        self.assertEqual((Scene3DOptions.model_validate(r.options).fps, Scene3DOptions.model_validate(r.options).engine), (24, "cycles"))
         ok = VideoJobRequest.model_validate(make3d(options={"shape": "cone", "object_color": "#00ff88", "fps": 12}))
         self.assertEqual(ok.options["shape"], "cone")
 
@@ -54,14 +54,29 @@ class SchemaBackwardCompat(unittest.TestCase):
     def test_3d_frame_budget_fail_fast(self):
         VideoJobRequest.model_validate(make3d(duration_seconds=10))                     # 240 frame: đúng giới hạn preview
         with self.assertRaises(ValidationError):
-            VideoJobRequest.model_validate(make3d(duration_seconds=11))                 # 264 > 240
-        VideoJobRequest.model_validate(make3d(duration_seconds=20, render_profile="standard"))  # 480
-        with self.assertRaises(ValidationError):
-            VideoJobRequest.model_validate(make3d(duration_seconds=21, render_profile="standard"))
+            VideoJobRequest.model_validate(make3d(duration_seconds=11))                 # 264 > 240 frame
         with self.assertRaises(ValidationError):  # 1080p yêu cầu profile standard
             VideoJobRequest.model_validate(make3d(resolution="1080p"))
-        with self.assertRaises(ValidationError):  # 1080p/standard: tối đa 240 frame
-            VideoJobRequest.model_validate(make3d(resolution="1080p", render_profile="standard", duration_seconds=11))
+
+    def test_3d_render_time_estimate_fail_fast(self):
+        std12 = {"fps": 12}
+        VideoJobRequest.model_validate(make3d(render_profile="standard", options=std12))        # ~700s <= 1000s
+        with self.assertRaises(ValidationError) as cm:                                          # 120 frame x 11s => vượt ngân sách
+            VideoJobRequest.model_validate(make3d(render_profile="standard"))
+        self.assertIn("Ước lượng render", str(cm.exception))
+        with self.assertRaises(ValidationError):                                                # 720p preview 10s@24fps quá nặng
+            VideoJobRequest.model_validate(make3d(resolution="720p", duration_seconds=10))
+        VideoJobRequest.model_validate(make3d(resolution="720p", duration_seconds=5, options=std12))  # 60 frame preview 720p
+        with self.assertRaises(ValidationError):                                                # 1080p/standard không vừa runner miễn phí
+            VideoJobRequest.model_validate(make3d(resolution="1080p", render_profile="standard", options=std12))
+
+    def test_estimate_function_scales_with_pixels_and_engine(self):
+        from app.schemas import estimate_render_seconds as est
+        base = est("cycles", "preview", "16:9", "480p", 60)
+        self.assertAlmostEqual(est("cycles", "preview", "16:9", "480p", 120) - base, 60 * 3.0)
+        self.assertGreater(est("cycles", "preview", "16:9", "720p", 60), base * 1.5)
+        self.assertGreater(est("eevee", "preview", "16:9", "480p", 60), base)
+        self.assertLess(est("cycles", "preview", "1:1", "480p", 60), base)
 
 
 class ServiceDispatch(unittest.TestCase):

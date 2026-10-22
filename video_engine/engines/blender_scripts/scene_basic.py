@@ -189,7 +189,14 @@ def configure_render(cfg: dict, scene) -> str:
         r.engine = "CYCLES"
         scene.cycles.device = "CPU"
         scene.cycles.samples = samples
-        scene.cycles.use_denoising = False if samples >= 64 else True
+        scene.cycles.use_denoising = samples >= 32  # OIDN tốn ~1/2 thời gian ở mẫu thấp -> chỉ bật khi mẫu đủ cao
+        scene.cycles.max_bounces = 4
+        scene.cycles.diffuse_bounces = 2
+        scene.cycles.glossy_bounces = 2
+        scene.cycles.transmission_bounces = 0
+        scene.cycles.volume_bounces = 0
+        scene.cycles.transparent_max_bounces = 0
+        scene.cycles.use_adaptive_sampling = True
         used = "CYCLES"
     else:
         # Blender 4.2-4.5 gọi là BLENDER_EEVEE_NEXT, 5.x quay lại BLENDER_EEVEE

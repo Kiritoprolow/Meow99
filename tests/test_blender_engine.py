@@ -149,7 +149,7 @@ class FakeBlenderPipeline(Env):
     def test_eevee_failure_falls_back_to_cycles_and_says_so(self):
         calls = self.tmp / "calls.txt"
         pre = 'if cfg["engine"] == "eevee":\n    print("EGL init failed"); sys.exit(3)'
-        rec = self.run_it(self.new_job(), make_fake(self.tmp, pre=pre), extra={"FAKE_CALLS": str(calls)})
+        rec = self.run_it(self.new_job(options={"fps": 12, "engine": "eevee"}), make_fake(self.tmp, pre=pre), extra={"FAKE_CALLS": str(calls)})
         self.assertEqual(rec["status"], "completed", rec.get("error"))
         self.assertEqual(calls.read_text().split(), ["eevee", "cycles"])
         report = json.loads((self.root / rec["result"]["prefix"] / "report.json").read_text(encoding="utf-8"))

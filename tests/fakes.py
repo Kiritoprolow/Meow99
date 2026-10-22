@@ -17,16 +17,18 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self.dispatched: list[tuple[str, int]] = []
+        self.dispatched_types: list[str] = []  # project_type của từng lần dispatch (song song với `dispatched`)
         self.runs: dict[int, dict[str, Any]] = {}
         self.fail_dispatch: GitHubError | None = None
         self.cancel_result = "cancelled"  # cancelled | stuck
         self.cancel_calls: list[int] = []
         self._next = 1000
 
-    def dispatch(self, job_id: str, attempt: int) -> None:
+    def dispatch(self, job_id: str, attempt: int, project_type: str = "video") -> None:
         if self.fail_dispatch:
             raise self.fail_dispatch
         self.dispatched.append((job_id, attempt))
+        self.dispatched_types.append(project_type)
         self._next += 1
         self.runs[self._next] = {"id": self._next, "status": "queued", "conclusion": None,
                                  "html_url": f"https://github.com/o/r/actions/runs/{self._next}",

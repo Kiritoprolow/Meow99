@@ -55,6 +55,8 @@ def build_mcp(service: JobService, owner: str = "default", **server_kwargs: Any)
         youtube_privacy: str = "private",
         confirm_public: bool = False,
         options: dict[str, Any] | None = None,
+        project_type: str = "video",
+        render_profile: str = "preview",
     ) -> dict[str, Any]:
         """Tạo job sản xuất video (bất đồng bộ). Trả về job_id ngay, không chờ render.
 
@@ -62,6 +64,11 @@ def build_mcp(service: JobService, owner: str = "default", **server_kwargs: Any)
         output_mode: preview (chỉ lưu lên Hugging Face Hub) | publish (thêm đăng YouTube nếu đã cấu hình).
         youtube_privacy: private | unlisted | public (public cần confirm_public=true).
         script: kịch bản có sẵn; nếu bỏ trống, hệ thống dùng kịch bản mẫu từ topic (không gọi LLM).
+        project_type: video (mặc định, slideshow có chữ) | animation_3d (cảnh Blender 3D thật: vật thể + camera chuyển động,
+            xuất MP4 không âm thanh + file .blend + PNG sequence). animation_2d/hybrid chưa hỗ trợ.
+        render_profile: preview (mặc định) | standard; chỉ dùng cho animation_3d.
+        options (animation_3d): shape cube|sphere|torus|cone, object_color/background_color dạng #rrggbb,
+            camera_move orbit|dolly, fps 12-30, engine eevee|cycles. duration_seconds x fps bị giới hạn theo profile.
         """
         payload = dict(topic=topic, style=style, duration_seconds=duration_seconds, aspect_ratio=aspect_ratio,
                        resolution=resolution, language=language, target_audience=target_audience,
@@ -69,6 +76,8 @@ def build_mcp(service: JobService, owner: str = "default", **server_kwargs: Any)
                        subtitle_enabled=subtitle_enabled, music_enabled=music_enabled,
                        thumbnail_enabled=thumbnail_enabled, output_mode=output_mode,
                        youtube_privacy=youtube_privacy, confirm_public=confirm_public, options=options or {})
+        if project_type != "video" or render_profile != "preview":  # chỉ gửi khi khác mặc định -> payload video giữ nguyên
+            payload.update(project_type=project_type, render_profile=render_profile)
         return guard(service.create_job)(payload, owner)
 
     @mcp.tool()

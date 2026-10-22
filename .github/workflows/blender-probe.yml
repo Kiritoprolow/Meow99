@@ -1,0 +1,92 @@
+name: blender-probe
+# TẠM THỜI (nhánh feat/3d-engine): đo bằng chứng thật giữa Blender chính thức và bản apt trên runner. Sẽ xóa sau khi chọn phương án.
+run-name: blender-probe ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BLENDER_VERSION: "5.2.2"
+  BLENDER_SHA256: "84098912789dc450e95697c4184fb8a90acbe5111c2ba4aede3fecb57806a168"
+
+jobs:
+  official:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Thông tin runner
+        run: |
+          lsb_release -d; uname -r; nproc; free -m | sed -n 2p; df -h / | tail -1; ldd --version | head -1
+      - name: Cache tarball Blender
+        id: bcache
+        uses: actions/cache@v4
+        with:
+          path: ~/blender-dl
+          key: blender-${{ env.BLENDER_VERSION }}-linux-x64
+      - name: Tải + xác minh SHA256 (nếu cache miss)
+        if: steps.bcache.outputs.cache-hit != 'true'
+        run: |
+          t0=$(date +%s)
+          mkdir -p ~/blender-dl
+          curl -fsSL --retry 3 -o ~/blender-dl/blender.tar.xz "https://download.blender.org/release/Blender5.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          echo "${BLENDER_SHA256}  $HOME/blender-dl/blender.tar.xz" | sha256sum -c -
+          echo "PROBE download_seconds=$(( $(date +%s) - t0 )) size=$(stat -c %s ~/blender-dl/blender.tar.xz)"
+      - name: Giải nén
+        run: |
+          t0=$(date +%s)
+          mkdir -p ~/blender && tar -xf ~/blender-dl/blender.tar.xz -C ~/blender --strip-components=1
+          echo "PROBE extract_seconds=$(( $(date +%s) - t0 ))"
+          echo "BLENDER_BIN=$HOME/blender/blender" >> "$GITHUB_ENV"
+      - name: Thiếu thư viện hệ thống?
+        run: |
+          ldd "$BLENDER_BIN" | grep 'not found' || echo "PROBE ldd_missing=none"
+      - name: Cài thư viện cần thiết nếu thiếu
+        run: |
+          t0=$(date +%s)
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libegl1 libsm6 libxkbcommon0 libx11-6 ffmpeg 2>&1 | tail -2
+          echo "PROBE libs_install_seconds=$(( $(date +%s) - t0 ))"
+          ldd "$BLENDER_BIN" | grep 'not found' || echo "PROBE ldd_missing_after=none"
+      - name: Phiên bản
+        run: "$BLENDER_BIN --version | head -3; $BLENDER_BIN -b --factory-startup --python-expr 'import sys,bpy;print(\"PROBE python\",sys.version.split()[0],\"bpy\",bpy.app.version_string)' | grep PROBE"
+      - name: Render EEVEE (không xvfb)
+        continue-on-error: true
+        run: |
+          bash scripts/ci/blender_probe_render.sh official eevee 854 480 12
+      - name: Render Cycles
+        continue-on-error: true
+        run: |
+          bash scripts/ci/blender_probe_render.sh official cycles 854 480 12
+      - name: Render EEVEE 720p
+        continue-on-error: true
+        run: |
+          bash scripts/ci/blender_probe_render.sh official eevee 1280 720 6
+
+  apt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cài blender từ apt
+        run: |
+          t0=$(date +%s)
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq blender ffmpeg 2>&1 | tail -2
+          echo "PROBE apt_install_seconds=$(( $(date +%s) - t0 ))"
+          echo "BLENDER_BIN=$(command -v blender)" >> "$GITHUB_ENV"
+          apt-cache policy blender | sed -n 1,3p
+          du -sh /usr/share/blender 2>/dev/null || true
+      - name: Phiên bản
+        run: "$BLENDER_BIN --version | head -3; $BLENDER_BIN -b --factory-startup --python-expr 'import sys,bpy;print(\"PROBE python\",sys.version.split()[0],\"bpy\",bpy.app.version_string)' | grep PROBE"
+      - name: Render EEVEE (không xvfb)
+        continue-on-error: true
+        run: |
+          bash scripts/ci/blender_probe_render.sh apt eevee 854 480 12
+      - name: Render Cycles
+        continue-on-error: true
+        run: |
+          bash scripts/ci/blender_probe_render.sh apt cycles 854 480 12

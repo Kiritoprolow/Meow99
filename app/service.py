@@ -59,6 +59,20 @@ class JobService:
             raise ServiceError("not_found", "Không tìm thấy job")
         return rec
 
+    def _dispatch(self, job_id: str, attempt: int, project_type: str) -> None:
+        if project_type == "video":
+            self.gh.dispatch(job_id, attempt)  # lời gọi y hệt trước đây
+        else:
+            self.gh.dispatch(job_id, attempt, project_type=project_type)
+
+    def _project_type(self, job_id: str) -> str:
+        """project_type của job (request.json là bất biến). Request cũ không có trường này -> "video"."""
+        try:
+            req = self.store.get_request(job_id)
+        except JobStoreError as exc:
+            raise ServiceError("store_error", self._safe(str(exc))) from None
+        return str((req or {}).get("project_type") or "video")
+
     def _find_run(self, rec: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
         """Trả về (run, cảnh báo). Ưu tiên run_id do worker ghi, sau đó tìm theo run-name."""
         try:
@@ -119,7 +133,11 @@ class JobService:
         job_id = new_job_id()
         record = JobRecord(job_id=job_id, owner=owner)
         try:
-            self.store.put_request(job_id, {**req.model_dump(mode="json"), "job_id": job_id, "owner": owner,
+            stored = req.model_dump(mode="json")
+            if req.project_type == "video":  # giữ nguyên định dạng request.json cũ cho job video
+                stored.pop("project_type", None)
+                stored.pop("render_profile", None)
+            self.store.put_request(job_id, {**stored, "job_id": job_id, "owner": owner,
                                             "created_at": record.created_at})
             self.store.put_status(job_id, record.model_dump(mode="json"))
         except JobStoreError as exc:
@@ -127,7 +145,7 @@ class JobService:
 
         self._create_times.append(now)
         try:
-            self.gh.dispatch(job_id, 1)
+            self._dispatch(job_id, 1, req.project_type)
         except GitHubError as exc:
             msg = self._safe(str(exc))
             record.status, record.stage, record.error = JobStatus.failed, "dispatch_failed", msg
@@ -141,7 +159,7 @@ class JobService:
         note = ""
         if req.output_mode == "publish":
             note = " Chế độ publish: YouTube chỉ chạy nếu đã cấu hình OAuth trong GitHub Secrets; nếu chưa, video vẫn được lưu lên Hub."
-        return {"ok": True, "job_id": job_id, "status": "queued",
+        return {"ok": True, "job_id": job_id, "status": "queued", "project_type": req.project_type,
                 "message": "Đã tạo job và kích hoạt GitHub Actions (chưa render xong). Dùng get_job_status để theo dõi." + note}
 
     def get_job_status(self, job_id: str, owner: str = "default") -> dict[str, Any]:
@@ -215,9 +233,10 @@ class JobService:
                         created_at=rec.get("created_at") or utcnow_iso())
         data = new.model_dump(mode="json")
         data["previous_error"] = rec.get("error")
+        project_type = self._project_type(job_id)  # đọc trước khi đổi trạng thái: lỗi store không để lại trạng thái dở
         try:
             self.store.put_status(job_id, data)
-            self.gh.dispatch(job_id, attempt)
+            self._dispatch(job_id, attempt, project_type)
         except JobStoreError as exc:
             raise ServiceError("store_error", self._safe(str(exc))) from None
         except GitHubError as exc:

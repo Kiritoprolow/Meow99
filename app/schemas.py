@@ -28,6 +28,26 @@ ACTIVE = {JobStatus.queued, JobStatus.running, JobStatus.uploading_to_hf, JobSta
 TERMINAL = {JobStatus.completed, JobStatus.failed, JobStatus.cancelled}
 
 
+PROJECT_TYPES = ("video", "animation_3d")  # animation_2d / hybrid chưa triển khai -> bị từ chối rõ ràng, không giả vờ hỗ trợ
+RENDER_PROFILES = ("preview", "standard")
+# Giới hạn fail-fast cho runner miễn phí: số frame tối đa theo profile (và 1080p bị giảm một nửa)
+MAX_3D_FRAMES = {"preview": 240, "standard": 480}
+MAX_3D_FRAMES_1080P = 240
+
+
+class Scene3DOptions(BaseModel):
+    """Tham số cảnh cho project_type=animation_3d, nằm trong `options`. extra=forbid để lỗi chính tả bị báo ngay."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    shape: Literal["cube", "sphere", "torus", "cone"] = "torus"
+    object_color: str = Field(default="#e4572e", pattern=r"^#[0-9a-fA-F]{6}$")
+    background_color: str = Field(default="#1b2a41", pattern=r"^#[0-9a-fA-F]{6}$")
+    camera_move: Literal["orbit", "dolly"] = "orbit"
+    fps: int = Field(default=24, ge=12, le=30)
+    engine: Literal["eevee", "cycles"] = "eevee"
+
+
 class VideoJobRequest(BaseModel):
     """Payload tạo job. Trường tùy chọn có mặc định hợp lý."""
 
@@ -49,6 +69,10 @@ class VideoJobRequest(BaseModel):
     output_mode: Literal["preview", "publish"] = "preview"
     youtube_privacy: Literal["private", "unlisted", "public"] = "private"
     confirm_public: bool = Field(default=False, description="Bắt buộc true nếu youtube_privacy=public")
+    project_type: Literal["video", "animation_3d"] = Field(
+        default="video", description="video = slideshow cũ; animation_3d = cảnh Blender 3D thật")
+    render_profile: Literal["preview", "standard"] = Field(
+        default="preview", description="Chỉ áp dụng cho animation_3d: preview (nhanh, mẫu thấp) hoặc standard")
     options: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("options")
@@ -68,6 +92,29 @@ class VideoJobRequest(BaseModel):
     def _public_needs_confirm(self) -> "VideoJobRequest":
         if self.output_mode == "publish" and self.youtube_privacy == "public" and not self.confirm_public:
             raise ValueError("Đăng công khai cần confirm_public=true (xác nhận rõ ràng)")
+        return self
+
+    @model_validator(mode="after")
+    def _project_type_rules(self) -> "VideoJobRequest":
+        if self.project_type == "video":
+            if self.render_profile != "preview":
+                raise ValueError("render_profile chỉ áp dụng cho project_type=animation_3d")
+            return self
+        # animation_3d: kiểm tra sớm (trước khi dispatch) để fail-fast, không tốn lượt chạy GitHub Actions
+        try:
+            opts = Scene3DOptions.model_validate(self.options)
+        except ValueError as exc:
+            raise ValueError(f"options không hợp lệ cho animation_3d: {exc}") from None
+        frames = self.duration_seconds * opts.fps
+        cap = MAX_3D_FRAMES[self.render_profile]
+        if self.resolution == "1080p":
+            if self.render_profile != "standard":
+                raise ValueError("1080p cần render_profile=standard")
+            cap = min(cap, MAX_3D_FRAMES_1080P)
+        if frames > cap:
+            raise ValueError(
+                f"animation_3d/{self.render_profile}{'/1080p' if self.resolution == '1080p' else ''}: tối đa {cap} frame "
+                f"(duration_seconds x fps = {frames}); giảm duration_seconds hoặc fps")
         return self
 
 

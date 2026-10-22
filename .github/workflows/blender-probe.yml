@@ -4,6 +4,9 @@ run-name: blender-probe ${{ github.sha }}
 
 on:
   workflow_dispatch:
+  push:  # workflow mới chỉ có trên nhánh nên API dispatch trả 404; kích hoạt bằng push khi sửa chính file này
+    branches: [feat/3d-engine]
+    paths: [".github/workflows/blender-probe.yml"]
 
 permissions:
   contents: read

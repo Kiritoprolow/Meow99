@@ -5,7 +5,7 @@ Không có tool nào nhận mã/lệnh tùy ý.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 try:  # mcp 2.x
     from mcp.server.mcpserver import MCPServer
@@ -55,8 +55,8 @@ def build_mcp(service: JobService, owner: str = "default", **server_kwargs: Any)
         youtube_privacy: str = "private",
         confirm_public: bool = False,
         options: dict[str, Any] | None = None,
-        project_type: str = "video",
-        render_profile: str = "preview",
+        project_type: Literal["video", "animation_3d"] = "video",
+        render_profile: Literal["preview", "standard"] = "preview",
     ) -> dict[str, Any]:
         """Tạo job sản xuất video (bất đồng bộ). Trả về job_id ngay, không chờ render.
 
@@ -64,9 +64,9 @@ def build_mcp(service: JobService, owner: str = "default", **server_kwargs: Any)
         output_mode: preview (chỉ lưu lên Hugging Face Hub) | publish (thêm đăng YouTube nếu đã cấu hình).
         youtube_privacy: private | unlisted | public (public cần confirm_public=true).
         script: kịch bản có sẵn; nếu bỏ trống, hệ thống dùng kịch bản mẫu từ topic (không gọi LLM).
-        project_type: video (mặc định, slideshow có chữ) | animation_3d (cảnh Blender 3D thật: vật thể + camera chuyển động,
+        project_type (THAM SỐ CẤP CAO NHẤT, không đặt trong options): video (mặc định, slideshow có chữ) | animation_3d (cảnh Blender 3D thật: vật thể + camera chuyển động,
             xuất MP4 không âm thanh + file .blend + PNG sequence). animation_2d/hybrid chưa hỗ trợ.
-        render_profile: preview (mặc định) | standard; chỉ dùng cho animation_3d.
+        render_profile (cấp cao nhất, KHÔNG phải tên engine): preview (mặc định) | standard; chỉ dùng cho animation_3d.
         options (animation_3d): shape cube|sphere|torus|cone, object_color/background_color dạng #rrggbb,
             camera_move orbit|dolly, fps 12-30, engine eevee|cycles. duration_seconds x fps bị giới hạn theo profile.
         """

@@ -51,6 +51,9 @@ def estimate_render_seconds(engine: str, profile: str, aspect_ratio: str, resolu
     return RENDER_FIXED_OVERHEAD_SECONDS + per_frame * frames
 
 
+MISPLACED_3D_OPTION_KEYS = frozenset({"project_type", "render_profile", "preview_only", "shape", "camera_move", "object_color", "background_color", "export_frames"})
+
+
 class Scene3DOptions(BaseModel):
     """Tham số cảnh cho project_type=animation_3d, nằm trong `options`. extra=forbid để lỗi chính tả bị báo ngay."""
 
@@ -113,11 +116,16 @@ class VideoJobRequest(BaseModel):
 
     @model_validator(mode="after")
     def _project_type_rules(self) -> "VideoJobRequest":
+        misplaced = sorted(MISPLACED_3D_OPTION_KEYS & set(self.options))
+        if misplaced and self.project_type == "video":
+            raise ValueError("options chứa khóa dành cho animation_3d " + str(misplaced) + " nhưng project_type đang là video (job sẽ chỉ render slideshow). Gửi project_type=animation_3d ở CẤP CAO NHẤT của create_video_job, không đặt trong options")
         if self.project_type == "video":
             if self.render_profile != "preview":
                 raise ValueError("render_profile chỉ áp dụng cho project_type=animation_3d")
             return self
         # animation_3d: kiểm tra sớm (trước khi dispatch) để fail-fast, không tốn lượt chạy GitHub Actions
+        if {"project_type", "render_profile", "preview_only"} & set(self.options):
+            raise ValueError("project_type và render_profile phải là tham số CẤP CAO NHẤT của create_video_job (render_profile là preview hoặc standard, không phải tên engine), không đặt trong options; options của animation_3d chỉ gồm: shape, object_color, background_color, camera_move, fps, engine, export_frames")
         try:
             opts = Scene3DOptions.model_validate(self.options)
         except ValueError as exc:

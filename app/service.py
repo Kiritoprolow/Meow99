@@ -274,6 +274,17 @@ class JobService:
             raise ServiceError("github_error", self._safe(str(exc))) from None
         if confirmed and confirmed.get("status") == "completed":
             if confirmed.get("conclusion") == "cancelled":
+                # `rec` là snapshot đọc từ trước lúc hủy: worker có thể đã ghi completed/cancelled hoặc job đã retry sang attempt mới
+                # trong lúc chờ GitHub xác nhận. Đọc lại bản mới nhất và không ghi đè nếu nó đã đổi.
+                try:
+                    fresh = self.store.get_status(job_id) or rec
+                except JobStoreError:
+                    fresh = rec
+                if (fresh.get("status") in {s.value for s in TERMINAL}
+                        or int(fresh.get("attempt", 1)) != int(rec.get("attempt", 1))):
+                    return {"ok": True, "cancelled": fresh.get("status") == "cancelled", "status": fresh.get("status"),
+                            "message": "Trạng thái job đã được worker/retry cập nhật trong lúc hủy; giữ nguyên bản mới nhất"}
+                rec = dict(fresh)
                 rec.update(status="cancelled", stage="cancelled", updated_at=utcnow_iso(), run_id=run["id"])
                 rec.pop("reconciled", None)
                 try:

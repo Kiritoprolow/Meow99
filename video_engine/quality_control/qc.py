@@ -91,7 +91,7 @@ def run_qc(video: Path, expected_size: tuple[int, int], expected_seconds: float,
             q = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
                                 "stream=nb_read_frames", "-of", "csv=p=0", str(video)], capture_output=True, text=True, timeout=120)
             nb = q.stdout.strip() or None
-        add("frame_count", nb is not None and int(nb) == expected_frames, f"{nb} frame (mong đợi {expected_frames})")
+        add("frame_count", str(nb).isdigit() and int(nb) == expected_frames, f"{nb} frame (mong đợi {expected_frames})")
     if v and check_motion:
         try:
             m = motion_stats(video, int(v.get("width", 0)), int(v.get("height", 0)))

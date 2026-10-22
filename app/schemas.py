@@ -61,6 +61,7 @@ class Scene3DOptions(BaseModel):
     background_color: str = Field(default="#1b2a41", pattern=r"^#[0-9a-fA-F]{6}$")
     camera_move: Literal["orbit", "dolly"] = "orbit"
     fps: int = Field(default=24, ge=12, le=30)
+    export_frames: bool = False  # true: đóng gói PNG sequence thành frames.zip (nặng, ~70MB cho 5s 480p); mặc định không cần
     engine: Literal["eevee", "cycles"] = "cycles"  # trên runner không GPU, Cycles CPU nhanh hơn EEVEE (OpenGL phần mềm)
 
 

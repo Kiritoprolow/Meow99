@@ -41,7 +41,7 @@ class SchemaBackwardCompat(unittest.TestCase):
     def test_3d_defaults_and_options(self):
         r = VideoJobRequest.model_validate(make3d())
         self.assertEqual((Scene3DOptions.model_validate(r.options).fps, Scene3DOptions.model_validate(r.options).engine), (24, "cycles"))
-        ok = VideoJobRequest.model_validate(make3d(options={"shape": "cone", "object_color": "#00ff88", "fps": 12}))
+        ok = VideoJobRequest.model_validate(make3d(options={"shape": "cone", "object_color": "#00ff88", "fps": 12, "export_frames": True}))
         self.assertEqual(ok.options["shape"], "cone")
 
     def test_3d_invalid_options_rejected_early(self):

@@ -50,6 +50,10 @@ def run_job(job_id: str, attempt: int, store: JobStore, storage: OutputStorage, 
         # dispatch đúp / re-run: attempt này đã hoàn tất -> không đụng vào kết quả (không render, không đánh dấu failed)
         log.warning("Job %s attempt %s đã hoàn tất, bỏ qua lần chạy trùng", job_id, attempt)
         return prev
+    if int(prev.get("attempt", attempt)) > attempt:
+        # run cũ (attempt thấp hơn) khởi động trễ sau khi job đã retry: không được ghi đè status.json của attempt mới
+        log.warning("Job %s: attempt %s đã lỗi thời (hiện tại %s), bỏ qua", job_id, attempt, prev.get("attempt"))
+        return prev
     rep = StatusReporter(store, job_id, attempt, run_id, run_url)
     own_tmp = workdir is None
     wd = Path(workdir) if workdir else Path(tempfile.mkdtemp(prefix=f"{job_id}_a{attempt}_"))  # riêng theo job + attempt

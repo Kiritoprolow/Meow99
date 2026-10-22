@@ -183,13 +183,14 @@ class Blender3DEngine:
         files: dict[str, Path] = {"scene.blend": blend_path}
         zip_path = wd / "frames.zip"
         total = sum(p.stat().st_size for p in frames_dir.glob("frame_*.png"))
-        if total <= MAX_FRAMES_ZIP_BYTES:
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:  # PNG đã nén sẵn
-                for i in range(1, frames + 1):
-                    zf.write(frames_dir / f"frame_{i:04d}.png", f"frame_{i:04d}.png")
-            files["frames.zip"] = zip_path
-        else:
-            notes.append(f"PNG sequence ({total // (1024 * 1024)} MB) vượt {MAX_FRAMES_ZIP_BYTES // (1024 * 1024)} MB nên không đóng gói frames.zip")
+        if opts.export_frames:  # mặc định KHÔNG đóng gói: video + scene.blend đã đủ, tránh tốn dung lượng và thời gian upload
+            if total <= MAX_FRAMES_ZIP_BYTES:
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:  # PNG đã nén sẵn
+                    for i in range(1, frames + 1):
+                        zf.write(frames_dir / f"frame_{i:04d}.png", f"frame_{i:04d}.png")
+                files["frames.zip"] = zip_path
+            else:
+                notes.append(f"PNG sequence ({total // (1024 * 1024)} MB) vượt {MAX_FRAMES_ZIP_BYTES // (1024 * 1024)} MB nên không đóng gói frames.zip")
 
         thumb = None
         if r["thumbnail_enabled"]:

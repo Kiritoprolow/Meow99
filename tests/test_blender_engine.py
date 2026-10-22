@@ -111,10 +111,10 @@ class FakeBlenderPipeline(Env):
         self.assertNotIn("audio", kinds)                          # không giả vờ có âm thanh
         self.assertEqual((kinds["video"]["width"], kinds["video"]["height"]), (854, 480))
         self.assertEqual(int(kinds["video"]["nb_frames"]), 60)
-        for name in ("scene.blend", "frames.zip", "thumbnail.jpg", "metadata.json", "report.json"):
+        for name in ("scene.blend", "thumbnail.jpg", "metadata.json", "report.json"):
             self.assertGreater((out / name).stat().st_size, 0, name)
-        with zipfile.ZipFile(out / "frames.zip") as zf:
-            self.assertEqual(len(zf.namelist()), 60)
+        self.assertFalse((out / "frames.zip").exists())            # mặc định không upload PNG sequence
+        self.assertNotIn("frames_url", res)
         self.assertEqual((res["project_type"], res["engine"]), ("animation_3d", "blender_3d"))
         self.assertTrue(res["scene_blend_url"].endswith("scene.blend"))
         self.assertTrue(res["qc"]["motion"]["changed_ratio"] >= 0.6)
@@ -125,6 +125,16 @@ class FakeBlenderPipeline(Env):
         self.assertEqual(report["engine_report"]["blender"]["version"], "5.2.2")
         self.assertNotIn("script.txt", [f["path"].rsplit("/", 1)[-1] for f in res["files"]])
         self.assertIsNone(report["engine_report"]["blender"]["fallback"])
+
+    def test_export_frames_is_opt_in(self):
+        rec = self.run_it(self.new_job(options={"fps": 12, "export_frames": True}), make_fake(self.tmp))
+        self.assertEqual(rec["status"], "completed", rec.get("error"))
+        out = self.root / rec["result"]["prefix"]
+        with zipfile.ZipFile(out / "frames.zip") as zf:
+            self.assertEqual(len(zf.namelist()), 60)
+        self.assertTrue(rec["result"]["frames_url"].endswith("frames.zip"))
+        report = json.loads((out / "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["engine_report"]["artifacts"]["png_sequence"], "frames.zip")
 
     def test_blender_not_installed_is_clear_error(self):
         jid = self.new_job()
@@ -319,8 +329,9 @@ class RealBlender(Env):
         self.assertAlmostEqual(float(info["format"]["duration"]), 5.0, delta=0.2)
         motion = rec["result"]["qc"]["motion"]
         self.assertGreaterEqual(motion["changed_ratio"], 0.6, motion)
-        with zipfile.ZipFile(out / "frames.zip") as zf:
-            self.assertEqual(len(zf.namelist()), frames)
+        if (out / "frames.zip").exists():
+            with zipfile.ZipFile(out / "frames.zip") as zf:
+                self.assertEqual(len(zf.namelist()), frames)
         self.assertEqual(rec["result"]["qc"]["ok"], True)
         return self._check_blend(out / "scene.blend")
 
@@ -336,8 +347,9 @@ class RealBlender(Env):
         self.assertIsNone(report["engine_report"]["blender"]["fallback"])
 
     def test_cycles_dolly_camera_square(self):
-        rec, out = self._run_real(aspect_ratio="1:1", options={"fps": 12, "shape": "cone", "camera_move": "dolly", "engine": "cycles"})
+        rec, out = self._run_real(aspect_ratio="1:1", options={"fps": 12, "shape": "cone", "camera_move": "dolly", "engine": "cycles", "export_frames": True})
         b = self._assert_real_outputs(rec, out, 60, 480, 480)
+        self.assertTrue((out / "frames.zip").exists())
         self.assertTrue(b["anim"]["Camera"])
         self.assertNotEqual(b["cam_pos"][0], b["cam_pos"][1])
 

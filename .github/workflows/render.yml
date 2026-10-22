@@ -1,7 +1,7 @@
 name: render-video
 
 # Tên run chứa job_id: gateway dùng nó để ánh xạ job_id -> workflow run.
-run-name: video-job ${{ inputs.job_id }} #${{ inputs.attempt }}
+run-name: "video-job ${{ inputs.job_id }} #${{ inputs.attempt }}"
 
 on:
   workflow_dispatch:
@@ -15,9 +15,19 @@ on:
         required: false
         default: "1"
         type: string
+      project_type:
+        description: "video (mặc định, slideshow) | animation_3d (cài Blender). Gateway chỉ gửi input này cho job 3D."
+        required: false
+        default: "video"
+        type: string
 
 permissions:
   contents: read
+
+env:
+  # Blender chính thức (LTS) chỉ được tải khi project_type=animation_3d. Hash lấy từ blender.org và đã đối chiếu độc lập.
+  BLENDER_VERSION: "5.2.2"
+  BLENDER_SHA256: "84098912789dc450e95697c4184fb8a90acbe5111c2ba4aede3fecb57806a168"
 
 concurrency:
   group: render-${{ inputs.job_id }}
@@ -41,14 +51,37 @@ jobs:
         env:
           JOB_ID: ${{ inputs.job_id }}
           ATTEMPT: ${{ inputs.attempt }}
+          PROJECT_TYPE: ${{ inputs.project_type }}
         run: |
           [[ "$JOB_ID" =~ ^job_[0-9]{8}_[0-9]{6}_[0-9a-f]{6}$ ]] || { echo "job_id không hợp lệ"; exit 1; }
           [[ "$ATTEMPT" =~ ^[1-5]$ ]] || { echo "attempt không hợp lệ"; exit 1; }
+          [[ "$PROJECT_TYPE" =~ ^(video|animation_3d)$ ]] || { echo "project_type không hợp lệ"; exit 1; }
 
       - name: Cài FFmpeg và font Unicode
+        env:
+          PROJECT_TYPE: ${{ inputs.project_type }}
         run: |
+          pkgs="ffmpeg fonts-dejavu-core"
+          # Thư viện hệ thống cho Blender (EGL/GL cho EEVEE, X11 client libs). Chỉ cài khi là job 3D.
+          if [[ "$PROJECT_TYPE" == "animation_3d" ]]; then
+            pkgs+=" libegl1 libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0 libx11-6"
+          fi
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          sudo apt-get install -y -qq $pkgs
+
+      - name: Cài Blender chính thức (chỉ job animation_3d)
+        if: inputs.project_type == 'animation_3d'
+        shell: bash
+        run: |
+          # Đo thật trên ubuntu-24.04: tải ~2s, giải nén ~18s => không cần actions/cache (cache tarball 383MB không nhanh hơn tải trực tiếp).
+          set -euo pipefail
+          dl="$RUNNER_TEMP/blender-dl"; mkdir -p "$dl" "$RUNNER_TEMP/blender"
+          curl -fsSL --retry 3 -o "$dl/blender.tar.xz"             "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          echo "${BLENDER_SHA256}  $dl/blender.tar.xz" | sha256sum -c -
+          tar -xf "$dl/blender.tar.xz" -C "$RUNNER_TEMP/blender" --strip-components=1
+          rm -f "$dl/blender.tar.xz"
+          "$RUNNER_TEMP/blender/blender" --version | head -1
+          echo "BLENDER_BIN=$RUNNER_TEMP/blender/blender" >> "$GITHUB_ENV"
 
       - name: Cài thư viện Python
         run: pip install -r requirements-worker.txt

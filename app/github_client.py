@@ -58,11 +58,15 @@ class GitHubClient:
             raise GitHubError("Không thấy repo/workflow/run (sai GITHUB_REPO, tên workflow hoặc thiếu quyền)", 404)
         return r
 
-    def dispatch(self, job_id: str, attempt: int) -> None:
+    def dispatch(self, job_id: str, attempt: int, project_type: str = "video") -> None:
+        inputs = {"job_id": job_id, "attempt": str(attempt)}
+        if project_type != "video":
+            # Chỉ gửi input mới khi cần (animation_3d) để workflow cũ chưa có input này vẫn nhận được job video.
+            inputs["project_type"] = project_type
         r = self._req(
             "POST",
             f"/repos/{self.repo}/actions/workflows/{self.workflow}/dispatches",
-            json={"ref": self.ref, "inputs": {"job_id": job_id, "attempt": str(attempt)}},
+            json={"ref": self.ref, "inputs": inputs},
         )
         if r.status_code != 204:
             raise GitHubError(f"Dispatch thất bại (HTTP {r.status_code}); kiểm tra workflow có trigger workflow_dispatch", r.status_code)

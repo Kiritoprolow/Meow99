@@ -9,6 +9,7 @@ Giới hạn có chủ đích (ghi rõ để không hiểu nhầm):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -26,6 +27,7 @@ from app.schemas import (MAX_3D_FRAMES, MAX_3D_FRAMES_1080P, RENDER_BUDGET_SECON
 from video_engine.engines.base import EngineOutput, RenderContext, StageError
 from video_engine.renderer.ffmpeg_renderer import run as run_cmd
 
+log = logging.getLogger("video_engine.blender_3d")
 SCENE_SCRIPT = Path(__file__).resolve().parent / "blender_scripts" / "scene_basic.py"
 MIN_BLENDER = (4, 2)                    # EEVEE Next ổn định từ 4.2; script đã thử trên 5.2 LTS
 SAMPLES = {("cycles", "preview"): 12, ("cycles", "standard"): 32,   # cycles: denoise tự bật từ 32 mẫu
@@ -130,6 +132,7 @@ class Blender3DEngine:
         ctx.progress("blender_check")
         binary = find_blender(ctx.env)
         ver, ver_text = blender_version(binary)
+        log.info("Blender: %s | %d frame @ %d fps, %dx%d, engine=%s, profile=%s", ver_text, frames, fps, *ctx.size, opts.engine, profile)
 
         frames_dir = wd / "frames"
         blend_path = wd / "scene.blend"
@@ -161,6 +164,7 @@ class Blender3DEngine:
         if rc != 0:
             raise StageError("render_3d", f"Blender lỗi (exit={rc}, engine={used}):\n{_tail(log)}")
         render_seconds = round(time.monotonic() - t0, 2)
+        log.info("Blender render xong: engine=%s, %d frame trong %.1fs (%.2f s/frame), scene.blend đã lưu", used, frames, render_seconds, render_seconds / frames)
 
         missing = [i for i in range(1, frames + 1)
                    if not (frames_dir / f"frame_{i:04d}.png").exists() or (frames_dir / f"frame_{i:04d}.png").stat().st_size == 0]

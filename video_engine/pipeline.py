@@ -74,6 +74,7 @@ def run_job(job_id: str, attempt: int, store: JobStore, storage: OutputStorage, 
         r = req.model_dump()
         size = frame_size(r["aspect_ratio"], r["resolution"])
         engine = get_engine(r["project_type"])
+        log.info("Job %s attempt %s: project_type=%s -> engine=%s", job_id, attempt, r["project_type"], engine.name)
 
         out = engine.render(RenderContext(job_id=job_id, attempt=attempt, request=r, workdir=wd, size=size,
                                           progress=progress, env=env))
@@ -122,8 +123,8 @@ def run_job(job_id: str, attempt: int, store: JobStore, storage: OutputStorage, 
             "files": up["files"], "youtube": youtube, "script_source": out.script_source,
             "qc": {"ok": True, **qc["probe"]}, "notes": notes,
         }
-        if r["project_type"] != "video":  # khóa bổ sung, chỉ xuất hiện với job không phải video thường
-            result["project_type"], result["engine"] = r["project_type"], engine.name
+        result["project_type"], result["engine"] = r["project_type"], engine.name  # người dùng thấy job THỰC SỰ chạy engine nào
+        if r["project_type"] != "video":
             if "scene.blend" in urls:
                 result["scene_blend_url"] = urls["scene.blend"]
             if "frames.zip" in urls:

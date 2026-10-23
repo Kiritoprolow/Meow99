@@ -68,8 +68,13 @@ jobs:
             pkgs+=" libegl1 libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0 libx11-6"
           fi
           apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-          sudo apt-get $apt_opts update -qq
-          sudo apt-get $apt_opts install -y -qq $pkgs
+          # DIAG tạm thời: nếu bước này đứng im quá 90s, in tiến trình/khóa đang giữ apt
+          ( sleep 90; echo "== STALL DIAG $(date -u +%T) =="; ps -eo pid,etime,stat,args --sort=etime | grep -E 'apt|dpkg|unattended|snap|needrestart' | grep -v grep | cut -c1-160; ls -l /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock 2>&1; sudo fuser -v /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock 2>&1 | head; getent hosts azure.archive.ubuntu.com archive.ubuntu.com | head -3 ) &
+          echo "apt update start $(date -u +%T)"
+          sudo apt-get $apt_opts update
+          echo "apt update done $(date -u +%T)"
+          sudo apt-get $apt_opts install -y $pkgs
+          echo "apt install done $(date -u +%T)"
 
       - name: Cài Blender chính thức (chỉ job animation_3d)
         if: inputs.project_type == 'animation_3d'

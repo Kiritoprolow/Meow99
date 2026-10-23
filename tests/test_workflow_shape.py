@@ -46,9 +46,11 @@ class WorkflowNetworkResilience(unittest.TestCase):
 
     def test_apt_step_cannot_hang_silently(self):
         step = self._step("FFmpeg")
-        self.assertLessEqual(step["timeout-minutes"], 10)
+        self.assertLessEqual(step["timeout-minutes"], 15)
         self.assertIn("Acquire::http::Timeout", step["run"])
-        self.assertIn("Acquire::Retries", step["run"])
+        self.assertIn("sudo timeout", step["run"])       # mỗi lần apt có giới hạn thời gian
+        self.assertIn("for attempt in 1 2 3", step["run"])  # và được thử lại
+        self.assertIn("exit 1", step["run"])               # hết lượt thì fail rõ ràng
 
     def test_blender_download_has_time_limit(self):
         self.assertIn("--max-time", self._step("Blender")["run"])

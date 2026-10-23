@@ -82,6 +82,19 @@ def req3d(**over):
     return base
 
 
+class RabbitConfig(unittest.TestCase):
+    def test_default_colors_follow_shape(self):
+        from video_engine.engines.blender_3d import resolve_colors
+        self.assertEqual(resolve_colors("rabbit", None, None), ("#fbecb5", "#f9a35b"))
+        self.assertEqual(resolve_colors("torus", None, None), ("#e4572e", "#1b2a41"))
+        self.assertEqual(resolve_colors("rabbit", "#ffffff", None), ("#ffffff", "#f9a35b"))   # người dùng ghi đè được
+
+    def test_rabbit_turntable_options_accepted(self):
+        from app.schemas import VideoJobRequest
+        r = VideoJobRequest.model_validate(req3d(duration_seconds=20, options={"fps": 12, "shape": "rabbit", "camera_move": "turntable"}))
+        self.assertEqual((r.options["shape"], r.options["camera_move"]), ("rabbit", "turntable"))
+
+
 class Env(unittest.TestCase):
     def setUp(self):
         self.svc, self.gh, self.store = make_service()
@@ -352,6 +365,42 @@ class RealBlender(Env):
         self.assertTrue((out / "frames.zip").exists())
         self.assertTrue(b["anim"]["Camera"])
         self.assertNotEqual(b["cam_pos"][0], b["cam_pos"][1])
+
+    def test_rabbit_turntable_real_render(self):
+        rec, out = self._run_real(options={"fps": 12, "shape": "rabbit", "camera_move": "turntable", "engine": "cycles"})
+        info = probe(out / "video.mp4")
+        v = next(s for s in info["streams"] if s["codec_type"] == "video")
+        self.assertEqual(int(v["nb_frames"]), 60)
+        self.assertGreaterEqual(rec["result"]["qc"]["motion"]["changed_ratio"], 0.6)
+        # cấu trúc .blend: đủ bộ phận, animation thật, viền Freestyle, camera quay đủ vòng
+        check = ("import bpy, json, math\nsc = bpy.context.scene\nO = bpy.data.objects\n"
+                 "sc.frame_set(1); a0 = O['CameraRig'].rotation_euler[2]\n"
+                 "sc.frame_set(sc.frame_end); a1 = O['CameraRig'].rotation_euler[2]\n"
+                 "sc.frame_set(1); z1 = O['MainObject'].location[2]\nsc.frame_set(10); z2 = O['MainObject'].location[2]\n"
+                 "print('RESULT=' + json.dumps({'parts': sorted(o.name for o in O if o.type == 'MESH'), 'freestyle': sc.render.use_freestyle,"
+                 " 'turn_deg': round(math.degrees(a1 - a0), 1), 'hop': [z1, z2], 'ear_anim': O['EarL'].animation_data is not None}))\n")
+        p = subprocess.run([REAL_BLENDER, "-b", "--factory-startup", str(out / "scene.blend"), "--python-expr", check],
+                           capture_output=True, text=True, timeout=180)
+        line = next(ln for ln in p.stdout.splitlines() if ln.startswith("RESULT="))
+        b = json.loads(line[len("RESULT="):])
+        for name in ("Body", "EarL", "EarR", "EarInnerL", "EarInnerR", "Eye-1", "Eye1", "Cheek-1", "Cheek1", "Mouth", "Tail", "Foot-1", "Foot1", "Arm-1", "Arm1"):
+            self.assertIn(name, b["parts"])
+        self.assertTrue(b["freestyle"] and b["ear_anim"])
+        self.assertAlmostEqual(b["turn_deg"], 360.0 * 59 / 60, delta=0.5)   # camera quay gần đủ 360 độ
+        self.assertNotEqual(b["hop"][0], b["hop"][1])                         # nhân vật nhún thật
+        # màu thực tế trên frame: có kem (thân), hồng (má/ruột tai), đen (viền/mắt), nền cam
+        from zipfile import ZipFile  # frame đầu lấy từ video để kiểm đúng cái người dùng thấy
+        frame = self.tmp / "f.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(out / "video.mp4"), "-frames:v", "1", str(frame)], check=True)
+        from PIL import Image
+        im = Image.open(frame).convert("RGB")
+        px = list(im.getdata())
+        def near(c, tol):
+            return sum(1 for q in px if abs(q[0] - c[0]) + abs(q[1] - c[1]) + abs(q[2] - c[2]) < tol)
+        self.assertGreater(near((251, 236, 181), 40), 2000)    # thân kem
+        self.assertGreater(near((248, 162, 90), 40), 20000)    # nền cam
+        self.assertGreater(near((20, 17, 15), 60), 300)        # viền + mắt đen
+        self.assertGreater(near((242, 154, 166), 50), 100)     # hồng
 
     def test_invalid_blender_script_failure_is_reported_not_hidden(self):
         # cfg hợp lệ nhưng ép lỗi bằng engine không tồn tại trong script -> script phải thoát mã != 0, harness báo lỗi thật

@@ -12,11 +12,15 @@ Mọi chuyển động là keyframe thật trong file .blend nên người dùng
 """
 import json
 import math
+import os
 import sys
 import time
 import traceback
 
 import bpy
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rabbit_character  # noqa: E402
 
 PI2 = math.tau
 FOCUS = (0.0, 0.0, 1.2)  # điểm camera nhìn vào
@@ -82,6 +86,19 @@ def set_background(cfg: dict) -> None:
         raise RuntimeError("Không tìm thấy node Background của World")
     bg.inputs[0].default_value = hex_rgba(cfg["background_color"])
     bg.inputs[1].default_value = 1.0
+    if cfg.get("shape") == "rabbit":
+        # Tia camera thấy màu nền; mọi tia khác (chiếu sáng) thấy ánh sáng trắng trung tính -> nhân vật không bị ám cam khi xoay
+        nt = world.node_tree
+        light_bg = nt.nodes.new("ShaderNodeBackground")
+        light_bg.inputs[0].default_value = (1.0, 1.0, 1.0, 1.0)
+        light_bg.inputs[1].default_value = float(cfg.get("ambient", 0.85))
+        is_cam = nt.nodes.new("ShaderNodeLightPath")
+        mix = nt.nodes.new("ShaderNodeMixShader")
+        out = nt.nodes.get("World Output")
+        nt.links.new(is_cam.outputs["Is Camera Ray"], mix.inputs[0])
+        nt.links.new(light_bg.outputs[0], mix.inputs[1])
+        nt.links.new(bg.outputs[0], mix.inputs[2])
+        nt.links.new(mix.outputs[0], out.inputs["Surface"])
     bpy.context.scene.world = world
 
 
@@ -100,25 +117,32 @@ def build_scene(cfg: dict) -> dict:
     bpy.ops.mesh.primitive_plane_add(size=40.0, location=(0, 0, 0))
     ground = bpy.context.active_object
     ground.name = "Ground"
-    ground.data.materials.append(make_material("GroundMat", hex_rgba("#9aa3ad"), roughness=0.9))
+    ground.data.materials.append(make_material("GroundMat", tuple(c * float(cfg.get("ground_scale", 0.65 if cfg["shape"] == "rabbit" else 1.0)) if i < 3 else c for i, c in enumerate(hex_rgba(cfg.get("ground_color") or "#9aa3ad"))), roughness=0.9))
 
-    # vật thể chính
-    main = add_shape(cfg["shape"])
-    main.name = "MainObject"
-    main.location = (0, 0, 1.0)
-    main.data.materials.append(make_material("MainMat", hex_rgba(cfg["object_color"]), roughness=0.35, metallic=0.15))
+    rabbit = cfg["shape"] == "rabbit"
+    rparts = None
+    pivot = None
+    if rabbit:
+        rparts = rabbit_character.build(scene, cfg, make_material, hex_rgba)
+        main = rparts["root"]
+    else:
+        # vật thể chính
+        main = add_shape(cfg["shape"])
+        main.name = "MainObject"
+        main.location = (0, 0, 1.0)
+        main.data.materials.append(make_material("MainMat", hex_rgba(cfg["object_color"]), roughness=0.35, metallic=0.15))
 
-    # vệ tinh quay quanh vật thể chính: empty xoay + quả cầu con
-    pivot = bpy.data.objects.new("SatellitePivot", None)
-    scene.collection.objects.link(pivot)
-    pivot.location = (0, 0, 1.6)
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.3, segments=32, ring_count=16, location=(0, 0, 0))
-    sat = bpy.context.active_object
-    sat.name = "Satellite"
-    bpy.ops.object.shade_smooth()
-    sat.parent = pivot
-    sat.location = (2.6, 0, 0)
-    sat.data.materials.append(make_material("SatMat", hex_rgba("#f5f5f5"), roughness=0.25))
+        # vệ tinh quay quanh vật thể chính: empty xoay + quả cầu con
+        pivot = bpy.data.objects.new("SatellitePivot", None)
+        scene.collection.objects.link(pivot)
+        pivot.location = (0, 0, 1.6)
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=0.3, segments=32, ring_count=16, location=(0, 0, 0))
+        sat = bpy.context.active_object
+        sat.name = "Satellite"
+        bpy.ops.object.shade_smooth()
+        sat.parent = pivot
+        sat.location = (2.6, 0, 0)
+        sat.data.materials.append(make_material("SatMat", hex_rgba("#f5f5f5"), roughness=0.25))
 
     # đèn
     sun_data = bpy.data.lights.new("Sun", "SUN")
@@ -126,6 +150,14 @@ def build_scene(cfg: dict) -> dict:
     sun = bpy.data.objects.new("Sun", sun_data)
     scene.collection.objects.link(sun)
     sun.rotation_euler = (math.radians(50), math.radians(10), math.radians(35))
+    if rabbit:  # sáng từ phía camera, bóng mềm
+        sun_data.energy, sun_data.angle = 2.0, 0.35
+        sun.rotation_euler = (math.radians(55), 0.0, math.radians(-20))
+        fill_data = bpy.data.lights.new("Fill", "SUN")  # đèn phụ từ phía sau để mặt lưng không tối khi camera xoay vòng
+        fill_data.energy, fill_data.angle = 1.2, 0.5
+        fill = bpy.data.objects.new("Fill", fill_data)
+        scene.collection.objects.link(fill)
+        fill.rotation_euler = (math.radians(-50), 0.0, math.radians(25))
 
     # camera + mục tiêu nhìn
     target = bpy.data.objects.new("CameraTarget", None)
@@ -139,11 +171,15 @@ def build_scene(cfg: dict) -> dict:
     scene.collection.objects.link(cam)
     cam.parent = rig
     cam.location = (0, -9.0, 3.2)
+    if rabbit:  # khung hình đủ chứa nhân vật cao ~2.9 đơn vị + biên độ nhún
+        cam_data.lens = 50
+        cam.location = (0, -9.5, 2.4)
+        target.location = (0.0, 0.0, 1.45)
     track = cam.constraints.new("TRACK_TO")
     track.target = target
     track.track_axis, track.up_axis = "TRACK_NEGATIVE_Z", "UP_Y"
     scene.camera = cam
-    return {"scene": scene, "main": main, "pivot": pivot, "rig": rig, "cam": cam, "n": n, "fps": fps}
+    return {"scene": scene, "main": main, "pivot": pivot, "rig": rig, "cam": cam, "n": n, "fps": fps, "rparts": rparts}
 
 
 def animate(cfg: dict, parts: dict) -> None:
@@ -156,23 +192,29 @@ def animate(cfg: dict, parts: dict) -> None:
     for f in range(1, n + 1):
         t = (f - 1) / fps  # giây
         u = (f - 1) / span  # 0..1 trên toàn clip
-        # vật thể chính: nảy 1 lần/giây + xoay 0.5 vòng/giây quanh trục Z
-        main.location[2] = 1.0 + 1.3 * abs(math.sin(math.pi * t))
-        main.rotation_euler[2] = PI2 * 0.5 * t
-        main.keyframe_insert(data_path="location", index=2, frame=f)
-        main.keyframe_insert(data_path="rotation_euler", index=2, frame=f)
-        # vệ tinh quay quanh vật thể: 1 vòng / 3 giây
-        pivot.rotation_euler[2] = PI2 * t / 3.0
-        pivot.keyframe_insert(data_path="rotation_euler", index=2, frame=f)
+        if parts["rparts"] is None:
+            # vật thể chính: nảy 1 lần/giây + xoay 0.5 vòng/giây quanh trục Z
+            main.location[2] = 1.0 + 1.3 * abs(math.sin(math.pi * t))
+            main.rotation_euler[2] = PI2 * 0.5 * t
+            main.keyframe_insert(data_path="location", index=2, frame=f)
+            main.keyframe_insert(data_path="rotation_euler", index=2, frame=f)
+            # vệ tinh quay quanh vật thể: 1 vòng / 3 giây
+            pivot.rotation_euler[2] = PI2 * t / 3.0
+            pivot.keyframe_insert(data_path="rotation_euler", index=2, frame=f)
         # camera
-        if cfg["camera_move"] == "orbit":
-            rig.rotation_euler[2] = math.radians(100.0) * u  # quét 100 độ quanh cảnh
+        if cfg["camera_move"] in ("orbit", "turntable"):
+            if cfg["camera_move"] == "turntable":  # xoay đủ 360 độ, frame cuối ngay trước điểm lặp
+                rig.rotation_euler[2] = PI2 * (f - 1) / n
+            else:
+                rig.rotation_euler[2] = math.radians(100.0) * u  # quét 100 độ quanh cảnh
             rig.keyframe_insert(data_path="rotation_euler", index=2, frame=f)
         else:  # dolly: tiến lại gần và hạ thấp dần
             cam.location[1] = -12.0 + 5.5 * u
             cam.location[2] = 4.2 - 1.6 * u
             cam.keyframe_insert(data_path="location", index=1, frame=f)
             cam.keyframe_insert(data_path="location", index=2, frame=f)
+    if parts["rparts"] is not None:
+        rabbit_character.animate(parts["rparts"], n, fps)
 
 
 def configure_render(cfg: dict, scene) -> str:
@@ -214,6 +256,8 @@ def main() -> None:
     parts = build_scene(cfg)
     animate(cfg, parts)
     used = configure_render(cfg, parts["scene"])
+    if parts["rparts"] is not None:
+        rabbit_character.setup_outline(parts["scene"], parts["rparts"], thickness=float(cfg.get("outline_px", 3.2 * int(cfg["width"]) / 854.0)))  # viền dày ~3.2px ở 854px rộng, tỉ lệ theo độ phân giải
     print(f"SCENE_READY engine={used} frames={parts['n']} fps={parts['fps']} size={cfg['width']}x{cfg['height']}", flush=True)
 
     bpy.ops.wm.save_as_mainfile(filepath=cfg["blend_path"], compress=True)  # lưu trước khi render

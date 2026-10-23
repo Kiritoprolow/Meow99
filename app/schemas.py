@@ -59,10 +59,10 @@ class Scene3DOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    shape: Literal["cube", "sphere", "torus", "cone"] = "torus"
-    object_color: str = Field(default="#e4572e", pattern=r"^#[0-9a-fA-F]{6}$")
-    background_color: str = Field(default="#1b2a41", pattern=r"^#[0-9a-fA-F]{6}$")
-    camera_move: Literal["orbit", "dolly"] = "orbit"
+    shape: Literal["cube", "sphere", "torus", "cone", "rabbit"] = "torus"  # rabbit: thỏ chibi dựng tay từ hình khối (không phải mô hình chính thức)
+    object_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")      # None = màu mặc định theo shape
+    background_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")  # None = màu nền mặc định theo shape
+    camera_move: Literal["orbit", "dolly", "turntable"] = "orbit"  # turntable: camera xoay đủ 360 độ quanh vật thể
     fps: int = Field(default=24, ge=12, le=30)
     export_frames: bool = False  # true: đóng gói PNG sequence thành frames.zip (nặng, ~70MB cho 5s 480p); mặc định không cần
     engine: Literal["eevee", "cycles"] = "cycles"  # trên runner không GPU, Cycles CPU nhanh hơn EEVEE (OpenGL phần mềm)

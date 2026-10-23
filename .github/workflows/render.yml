@@ -58,6 +58,7 @@ jobs:
           [[ "$PROJECT_TYPE" =~ ^(video|animation_3d)$ ]] || { echo "project_type không hợp lệ"; exit 1; }
 
       - name: Cài FFmpeg và font Unicode
+        timeout-minutes: 8   # job thử nghiệm từng treo ~20 phút ở bước apt (không có log); fail sớm thay vì đứng im
         env:
           PROJECT_TYPE: ${{ inputs.project_type }}
         run: |
@@ -66,8 +67,9 @@ jobs:
           if [[ "$PROJECT_TYPE" == "animation_3d" ]]; then
             pkgs+=" libegl1 libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0 libx11-6"
           fi
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq $pkgs
+          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $apt_opts update -qq
+          sudo apt-get $apt_opts install -y -qq $pkgs
 
       - name: Cài Blender chính thức (chỉ job animation_3d)
         if: inputs.project_type == 'animation_3d'
@@ -76,7 +78,7 @@ jobs:
           # Đo thật trên ubuntu-24.04: tải ~2s, giải nén ~18s => không cần actions/cache (cache tarball 383MB không nhanh hơn tải trực tiếp).
           set -euo pipefail
           dl="$RUNNER_TEMP/blender-dl"; mkdir -p "$dl" "$RUNNER_TEMP/blender"
-          curl -fsSL --retry 3 -o "$dl/blender.tar.xz"             "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          curl -fsSL --retry 3 --max-time 600 -o "$dl/blender.tar.xz"             "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
           echo "${BLENDER_SHA256}  $dl/blender.tar.xz" | sha256sum -c -
           tar -xf "$dl/blender.tar.xz" -C "$RUNNER_TEMP/blender" --strip-components=1
           rm -f "$dl/blender.tar.xz"

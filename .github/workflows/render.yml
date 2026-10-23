@@ -58,6 +58,7 @@ jobs:
           [[ "$PROJECT_TYPE" =~ ^(video|animation_3d)$ ]] || { echo "project_type không hợp lệ"; exit 1; }
 
       - name: Cài FFmpeg và font Unicode
+        timeout-minutes: 12
         env:
           PROJECT_TYPE: ${{ inputs.project_type }}
         run: |
@@ -66,8 +67,21 @@ jobs:
           if [[ "$PROJECT_TYPE" == "animation_3d" ]]; then
             pkgs+=" libegl1 libgl1 libxi6 libxxf86vm1 libxfixes3 libxrender1 libsm6 libxkbcommon0 libx11-6"
           fi
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq $pkgs
+          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          # apt trên runner thỉnh thoảng đứng im không log (đã gặp 2 lần: ~20 phút, rồi >8 phút); lần chạy lại thường xong trong <1 phút.
+          # Mỗi lần thử có giới hạn thời gian; thất bại thì in tiến trình/khóa đang giữ apt để biết nguyên nhân rồi thử lại.
+          install_pkgs() {
+            sudo timeout 90 apt-get $apt_opts update -q && sudo timeout 180 apt-get $apt_opts install -y -q $pkgs
+          }
+          for attempt in 1 2 3; do
+            echo "apt lần $attempt bắt đầu $(date -u +%T)"
+            if install_pkgs; then echo "apt xong $(date -u +%T)"; break; fi
+            echo "apt lần $attempt thất bại hoặc quá thời gian $(date -u +%T); chẩn đoán:"
+            ps -eo pid,etime,stat,args | grep -E 'apt|dpkg|unattended|needrestart' | grep -v grep | cut -c1-160 || true
+            sudo fuser -v /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock 2>&1 | head || true
+            sudo dpkg --configure -a || true
+            if [ "$attempt" = 3 ]; then echo "apt thất bại sau 3 lần"; exit 1; fi
+          done
 
       - name: Cài Blender chính thức (chỉ job animation_3d)
         if: inputs.project_type == 'animation_3d'
@@ -76,7 +90,7 @@ jobs:
           # Đo thật trên ubuntu-24.04: tải ~2s, giải nén ~18s => không cần actions/cache (cache tarball 383MB không nhanh hơn tải trực tiếp).
           set -euo pipefail
           dl="$RUNNER_TEMP/blender-dl"; mkdir -p "$dl" "$RUNNER_TEMP/blender"
-          curl -fsSL --retry 3 -o "$dl/blender.tar.xz"             "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+          curl -fsSL --retry 3 --max-time 600 -o "$dl/blender.tar.xz"             "https://download.blender.org/release/Blender${BLENDER_VERSION%.*}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
           echo "${BLENDER_SHA256}  $dl/blender.tar.xz" | sha256sum -c -
           tar -xf "$dl/blender.tar.xz" -C "$RUNNER_TEMP/blender" --strip-components=1
           rm -f "$dl/blender.tar.xz"

@@ -39,5 +39,22 @@ class WorkflowShape(unittest.TestCase):
         self.assertIn("inputs.attempt", self.wf["run-name"])
 
 
+class WorkflowNetworkResilience(unittest.TestCase):
+    def _step(self, word):
+        wf = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        return next(s for s in wf["jobs"]["render"]["steps"] if word in (s.get("name") or ""))
+
+    def test_apt_step_cannot_hang_silently(self):
+        step = self._step("FFmpeg")
+        self.assertLessEqual(step["timeout-minutes"], 15)
+        self.assertIn("Acquire::http::Timeout", step["run"])
+        self.assertIn("sudo timeout", step["run"])       # mỗi lần apt có giới hạn thời gian
+        self.assertIn("for attempt in 1 2 3", step["run"])  # và được thử lại
+        self.assertIn("exit 1", step["run"])               # hết lượt thì fail rõ ràng
+
+    def test_blender_download_has_time_limit(self):
+        self.assertIn("--max-time", self._step("Blender")["run"])
+
+
 if __name__ == "__main__":
     unittest.main()

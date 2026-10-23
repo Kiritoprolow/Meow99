@@ -173,7 +173,7 @@ def build_scene(cfg: dict) -> dict:
     cam.location = (0, -9.0, 3.2)
     if rabbit:  # khung hình đủ chứa nhân vật cao ~2.9 đơn vị + biên độ nhún
         cam_data.lens = 50
-        cam.location = (0, -9.5, 2.4)
+        cam.location = (0, -9.5, 4.0)  # nhìn xuống ~15 độ: đường chân trời nằm ngoài khung nên không có vạch sàn/nền
         target.location = (0.0, 0.0, 1.45)
     track = cam.constraints.new("TRACK_TO")
     track.target = target

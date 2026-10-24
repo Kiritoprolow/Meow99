@@ -38,6 +38,16 @@ _SECRET_HINTS = ("TOKEN", "SECRET", "KEY", "PASSWORD")
 _VERSION_RE = re.compile(r"Blender\s+(\d+)\.(\d+)(?:\.(\d+))?")
 
 
+# Màu mặc định (thân, nền) theo shape; thỏ dùng tông kem + nền cam theo ảnh tham khảo
+DEFAULT_COLORS = {"rabbit": ("#fbecb5", "#f9a35b")}
+GENERIC_COLORS = ("#e4572e", "#1b2a41")
+
+
+def resolve_colors(shape: str, object_color: str | None, background_color: str | None) -> tuple[str, str]:
+    obj_default, bg_default = DEFAULT_COLORS.get(shape, GENERIC_COLORS)
+    return object_color or obj_default, background_color or bg_default
+
+
 def find_blender(env: Mapping[str, str]) -> str:
     path = env.get("BLENDER_BIN") or shutil.which("blender")
     if not path or not Path(path).exists():
@@ -143,10 +153,13 @@ class Blender3DEngine:
             if frames_dir.exists():
                 shutil.rmtree(frames_dir)
             frames_dir.mkdir()
+            obj_color, bg_color = resolve_colors(opts.shape, opts.object_color, opts.background_color)
             cfg = {"frames_dir": str(frames_dir), "blend_path": str(blend_path), "width": w, "height": h, "fps": fps,
-                   "frames": frames, "shape": opts.shape, "object_color": opts.object_color,
-                   "background_color": opts.background_color, "camera_move": opts.camera_move, "engine": engine,
+                   "frames": frames, "shape": opts.shape, "object_color": obj_color,
+                   "background_color": bg_color, "camera_move": opts.camera_move, "engine": engine,
                    "samples": SAMPLES[(engine, profile)]}
+            if opts.shape == "rabbit":
+                cfg["ground_color"] = bg_color  # sàn cùng tông nền để nhân vật đứng trên nền liền mạch
             cfg_path = wd / f"scene_config_{engine}.json"
             cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
             log_path = wd / f"blender_{engine}.log"
